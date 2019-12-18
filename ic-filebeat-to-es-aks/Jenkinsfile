@@ -1,0 +1,256 @@
+pipeline {
+  agent {
+    kubernetes {
+        label 'apttus-helmchart-builder'
+        defaultContainer 'jnlp'
+        yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    name: apttus-helmchart-builder
+spec:
+  containers:
+  - name: ic-helmchart-builder
+    image: art01-ic-devops.jfrog.io/ic-helmchart-builder:2.x
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - mountPath: /var/run/docker.sock
+      name: host-file
+  volumes:
+  - name: host-file
+    hostPath:
+      path: /var/run/docker.sock
+      type: File
+  imagePullSecrets:
+  - name: devops-docker-secret
+  """
+    }
+  }
+  stages {
+		stage('Helm Initialize') {
+			steps {
+				script {
+					propertiesPath="./ic-filebeat-to-es/config.properties"
+          configProps = readProperties file: propertiesPath
+
+					ciEnabled= configProps['CI_ENABLED']
+					if(ciEnabled && ciEnabled.toUpperCase() == "TRUE"){
+						chartRepoName = configProps['REPO_NAME']
+						artifactoryUrl = configProps['ARTIFACTORY_URL']
+						helmChartFilePath = configProps['YAML_CHART_FILE_PATH']
+						chartPackagePath = configProps['HELM_PACKAGE_PROJECT_PATH']
+						jenkinsArtifactoryCredId = configProps['JENKINS_ARTIFACTORY_CREDS_ID']
+						jenkinsBitbucketCredId = configProps['JENKINS_BITBUCKET_CREDS_ID']
+						notificationChannel = configProps['JENKINS_NOTIFICATION_CHANNEL']
+						rootPath = "."
+            ciskipResult = checkCISkip(rootPath, notificationChannel, jenkinsBitbucketCredId)
+            if(ciskipResult == "TRUE") {
+              currentBuild.result = 'ABORTED'
+              return
+            }
+            
+            chartVersion=updateHelmChartVersion(chartPackagePath, notificationChannel)
+						lintHelmChart(chartPackagePath, notificationChannel)
+						packageHelmChart(chartPackagePath, notificationChannel)
+						publishResult=publishHelmChart(chartPackagePath, jenkinsArtifactoryCredId, artifactoryUrl, chartRepoName, notificationChannel)
+						if(publishResult == "FALSE"){
+							currentBuild.result = 'ABORTED'
+              return
+						}
+						sendNotifications("Info","${notificationChannel}","helm-cicd", "Published the chart version: ${chartVersion}")
+						gitTag(chartPackagePath, jenkinsBitbucketCredId, notificationChannel)
+					} else {
+						println "CI is disabled."
+					}
+				}
+			}
+			
+		}
+  }
+}
+
+void lintHelmChart(String chartPackagePath, String notificationChannelName) {
+    try{
+        stage("Lint-Chart"){
+          container('ic-helmchart-builder') {
+						sh "make lint HELM_PACKAGE_PATH=${chartPackagePath}"
+					}
+          sendNotifications("INFO","${notificationChannelName}","Lint-Chart", "Linted Chart ${chartPackagePath}")
+        }
+    }
+    catch (error) {
+        sendNotifications("Failure","${notificationChannelName}","Lint-Chart")
+        throw error
+    }
+}
+
+String updateHelmChartVersion(String chartPackagePath, String notificationChannelName) {
+    try{
+        stage("Update-Version"){
+          container('ic-helmchart-builder') {
+						sh "make update-chart-version HELM_PACKAGE_PATH=${chartPackagePath}"
+					}
+					chartVersionProps = readProperties file: "./chartVersion.properties"
+					chartVersion = chartVersionProps["CHART_VERSION"]
+          sendNotifications("INFO","${notificationChannelName}","Update-Version", "Updated Chart version with new version: ${chartVersion}")
+					return chartVersion
+        }
+    }
+    catch (error) {
+        sendNotifications("Failure","${notificationChannelName}","Update-Version", "Failed to update the chart version.")
+        throw error
+    }
+}
+
+void packageHelmChart(String chartPackagePath, String notificationChannelName) {
+    try{
+        stage("Package-Chart"){
+          container('ic-helmchart-builder') {
+						sh "make package HELM_PACKAGE_PATH=${chartPackagePath}"
+					}
+        }
+    }
+    catch (error) {
+        sendNotifications("Failure","${notificationChannelName}","Package-Chart")
+        throw error
+    }
+}
+
+String publishHelmChart(String chartPackagePath, String jenkinsArtifactoryCredId, String artifactoryUrl, String helmChartRepo, String notificationChannelName) {
+    try{
+        stage("Publish-Chart"){
+					withCredentials([usernamePassword(credentialsId: "${jenkinsArtifactoryCredId}", passwordVariable: 'apikey', usernameVariable: 'username')]) {
+						container('ic-helmchart-builder') {
+							sh "make check ARTIFACTORY_USER_CRED=${username}:${apikey} ARTIFACTORY_URL=${artifactoryUrl} REPO_NAME=${helmChartRepo} HELM_PACKAGE_PATH=${chartPackagePath}"
+							chartExistsProps = readProperties file: "./chartExists.properties"
+							chartExists="0"
+							chartExists=chartExistsProps["CHART_EXISTS"]
+							if(chartExists == "0"){
+								sh "make push ARTIFACTORY_USER_CRED=${username}:${apikey} ARTIFACTORY_URL=${artifactoryUrl} REPO_NAME=${helmChartRepo} HELM_PACKAGE_PATH=${chartPackagePath}"
+								return "TRUE"
+							} else {
+								return "FALSE"
+							}
+						}
+					}
+        }
+    }
+    catch (error) {
+        sendNotifications("Failure","${notificationChannelName}","Publish-Chart")
+        throw error
+    }
+}
+
+void gitTag(String chartPackagePath, String jenkinsBitbucketCredId, String notificationChannelName) {
+    try{
+        stage("Git-Tag"){
+          withCredentials(bindings: [sshUserPrivateKey(credentialsId: "${jenkinsBitbucketCredId}", keyFileVariable: 'sshKeyLocation' )]) {
+						container('ic-helmchart-builder'){
+							sh "make git-tag SSH_KEY_LOCATION=${sshKeyLocation} HELM_PACKAGE_PATH=${chartPackagePath}"	
+						}
+					}
+        }
+    }
+    catch (error) {
+        sendNotifications("Failure","${notificationChannelName}","Git-Tag")
+        throw error
+    }
+}
+
+@NonCPS
+def currentBuildHasChangeSetsLog(){
+    def changeLogSets = currentBuild.changeSets
+    changeLogSetsSize=changeLogSets.size()
+    if(changeLogSetsSize == 0){
+        return "FALSE"
+    } else {
+        return "TRUE"
+    }
+}
+
+String evaluateCISkip(String rootPath, String notificationChannelName, String aicJenkinsBitbucketCredId) {
+
+    ciSkip="FALSE"
+    ciSkipPropertyFileName="ciskip"
+    try{
+        withCredentials(bindings: [sshUserPrivateKey(credentialsId: "${aicJenkinsBitbucketCredId}", keyFileVariable: 'AIC_SSH_KEY_LOCATION' )]) {
+            container('ic-helmchart-builder'){
+                sh "make evaluate-ci-skip SSH_KEY_LOCATION=${AIC_SSH_KEY_LOCATION} PROPERTY_FILE_NAME=${ciSkipPropertyFileName}"
+                ciSkipProp = readProperties file: "${rootPath}/${ciSkipPropertyFileName}.properties"
+                ciSkip = ciSkipProp['CI_SKIP']
+                println "ci-skip for current execution is : ${ciSkip}"
+            }
+        }
+        return ciSkip
+    }
+    catch (error) {
+        sendNotifications("Failure","${notificationChannelName}","CICD")
+        throw error
+    }
+}
+
+String checkCISkip(String rootPath, String notificationChannelName, String aicJenkinsBitbucketCredId){
+    try {
+        stage('Check ci-skip'){
+            def hasChangeSetLogs = currentBuildHasChangeSetsLog()
+            if(hasChangeSetLogs == "TRUE"){
+                ciskipResult = evaluateCISkip(rootPath, notificationChannelName, aicJenkinsBitbucketCredId)
+                if(ciskipResult == "TRUE") {
+                    return "TRUE"
+                } else {
+                    return "FALSE"
+                }
+            } else {
+                //for manual trigger and downstream trigger.
+                return "FALSE"
+            }
+        }
+    } catch (error) {
+        sendNotifications("Failure","${notificationChannelName}","Check ci-skip")
+        throw error
+    }
+}
+
+def sendNotifications(String buildStatus = 'INFO', String channel, String stageName, String additinalMsg = "" ) {
+
+  def colorName = 'RED'
+  def colorCode = '#FF0000'
+  def subject = "${buildStatus}: Job '${env.JOB_NAME} [${currentBuild.displayName}]'"
+  def summary = "${subject} \n Job Name: '${env.JOB_NAME} \n Build Number: [${currentBuild.displayName}]' \n Build URL: (${env.BUILD_URL}) \n Stage Name: ${stageName} \n Additional Info: ${additinalMsg}"
+  def details = """<p>${buildStatus}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
+    <p>Check console output at &QUOT;<a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>&QUOT;</p>"""
+  if (buildStatus == 'WARN') {
+    color = 'ORANGE'
+    colorCode = '#FF4000'
+  } else if (buildStatus == 'DEBUG') {
+    color = 'GREY'
+    colorCode = '#848484'
+  } 
+  else if (buildStatus == 'INFO') {
+    color = 'GREEN'
+    colorCode = '#00FF00'
+  }
+  else if (buildStatus == 'Failure') {
+    color = 'RED'
+    colorCode = '#FF0000'
+  } else {
+    color = 'BLACK'
+    colorCode = '#000000'
+  }
+
+	//Send notification on MSFT Teams 
+	//Default channel is cicd-alert group
+  webhookChannel="https://outlook.office.com/webhook/85806430-022c-47e1-8176-89f479fb2cbd@3a41ae53-fb35-4431-be7b-a0b3e1aee3c0/JenkinsCI/29fef30a618c47c7ad729bd0f9937c65/b97b5136-db72-4aad-a314-e7d4a765a878"
+  
+  if(channel.contains("https://outlook.office.com/webhook")){
+    webhookChannel=channel
+  } else {
+    //Notify on Slack
+    slackSend (color: colorCode,channel: channel, message: summary)
+  }
+  //Notify on MSFT TEAMS
+  office365ConnectorSend message: summary,status:buildStatus,webhookUrl:webhookChannel,color: colorCode 
+}

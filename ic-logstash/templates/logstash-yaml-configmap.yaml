@@ -1,0 +1,17 @@
+{{- $appName := .Values.labels.appname -}}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $appName }}-yaml
+  labels:
+    app: {{ $appName }}-yaml
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  logstash.yml: |
+    
+
+     http.host: "0.0.0.0"
+#{{ .Files.Get "logstash.yml" | indent 4}}

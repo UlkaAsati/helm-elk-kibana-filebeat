@@ -1,0 +1,87 @@
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: {{ .Values.appname }}
+  namespace: kube-system
+  labels:
+    k8s-app: {{ .Values.appname }}
+    kubernetes.io/cluster-service: "true"
+spec:
+  template:
+    metadata:
+      labels:
+        k8s-app: filebeat
+        kubernetes.io/cluster-service: "true"
+    spec:
+      serviceAccountName: filebeat
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: {{ .Values.appname }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        args: [
+          "-c", "/etc/filebeat.yml",
+          "-e",
+        ]
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        securityContext:
+          runAsUser: 0
+        resources:
+          limits:
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        volumeMounts:
+        - name: config
+          mountPath: /etc/filebeat.yml
+          readOnly: true
+          subPath: filebeat.yml
+        - name: {{ .Values.appname }}-es-cert-config
+          mountPath: /usr/share/filebeat/certificate.pem	
+          subPath: certificate.pem
+        - name: prospectors
+          mountPath: /usr/share/filebeat/prospectors.d
+          readOnly: true
+        - name: data
+          mountPath: /usr/share/filebeat/data
+        - name: varlibdockercontainers
+          mountPath: /var/data/kubeletlogs
+          readOnly: true
+        - name: varlibdockercontainers1
+          mountPath: /var/lib/docker/containers/
+          readOnly: true
+        - name: varlibdockercontainers2
+          mountPath: /var/log/
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          defaultMode: 0600
+          name: filebeat-config
+      - name: {{ .Values.appname }}-es-cert-config
+        configMap:
+          name: {{ .Values.appname }}-es-cert-config
+          items:
+          - key: certificate.pem
+            path: certificate.pem
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/data/kubeletlogs
+      - name: varlibdockercontainers1
+        hostPath:
+          path: /var/lib/docker/containers/
+      - name: varlibdockercontainers2
+        hostPath:
+          path: /var/log/
+      - name: prospectors
+        configMap:
+          defaultMode: 0600
+          name: filebeat-prospectors
+      - name: data
+        hostPath:
+          path: {{ .Values.data.hostPath }}
+          type: DirectoryOrCreate

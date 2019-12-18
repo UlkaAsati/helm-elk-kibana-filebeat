@@ -1,0 +1,70 @@
+{{- $labels := .Values.labels -}}
+{{- $appName := .Values.labels.appname -}}
+
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: {{ $appName }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  template:
+    metadata:
+      labels:
+        app: {{ $appName }}
+    spec:
+      hostname: {{ $appName }}
+      containers:
+      - name: {{ $appName }}
+        ports:
+          - containerPort: {{ .Values.service.filebeatPort }}
+            name: filebeat
+          - containerPort: {{ .Values.service.logstashPort }}
+            name: {{ $appName }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+        {{- range $key, $value := .Values.env }}
+        - name: "{{ $key }}"
+          value: "{{ $value }}"
+        {{- end }}
+        volumeMounts:
+        - name: {{ $appName }}-config
+          mountPath: /usr/share/logstash/pipeline/certificate.pem	
+          subPath: certificate.pem		  
+        - name: {{ $appName }}-pipeline-configmap
+          mountPath: /usr/share/logstash/pipeline/logstash.conf
+          subPath: logstash.conf
+        - name: {{ $appName }}-yaml
+          mountPath: /usr/share/logstash/config/logstash.yml
+          subPath: logstash.yml
+        - name: {{ $appName }}-log4jsproperties-configmap
+          mountPath: /usr/share/logstash/config/log4j2.properties
+          subPath: log4j2.properties
+        command:
+        - logstash
+        args: ["-f", "/usr/share/logstash/pipeline/logstash.conf"]
+      volumes:
+      - name: {{ $appName }}-pipeline-configmap
+        configMap:
+          name: {{ $appName }}-pipeline-configmap
+          items:
+          - key: logstash.conf
+            path: logstash.conf
+      - name: {{ $appName }}-config
+        configMap:
+          name: {{ $appName }}-config
+          items:
+          - key: certificate.pem
+            path: certificate.pem
+      - name: {{ $appName }}-yaml
+        configMap:
+          name: {{ $appName }}-yaml
+          items:
+          - key: logstash.yml
+            path: logstash.yml
+      - name: {{ $appName }}-log4jsproperties-configmap
+        configMap:
+          name: {{ $appName }}-log4jsproperties-configmap
+          items:
+          - key: log4j2.properties
+            path: log4j2.properties

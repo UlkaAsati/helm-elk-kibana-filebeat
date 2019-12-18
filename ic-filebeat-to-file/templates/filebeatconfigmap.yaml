@@ -1,0 +1,76 @@
+{{- $creds := .Values.logstash -}}
+{{- $condition := .Values.filebeat.provider.whenregexp -}}
+{{- $escreds := .Values.elasticsearch -}}
+
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: kube-system
+  labels:
+    k8s-app: filebeat
+    kubernetes.io/cluster-service: "true"
+data:
+  filebeat.yml: |-
+    filebeat.config:
+      modules:
+        path: ${path.config}/modules.d/*.yml
+        # Reload module configs as they change:
+        reload.enabled: false
+   
+ 
+    filebeat.autodiscover:
+      providers:
+        - type: kubernetes
+          include_pod_uid: true
+          in_cluster: true
+          hints.enabled: true
+          include_annotations: '*'
+          templates:
+            - condition.regexp:
+                kubernetes.container.name: '{{ $condition.kubernetescontainername }}'
+              config:
+                - type: docker
+                  combine_partial: true
+                  cri.parse_flags: true
+                  cri.force: true
+                  containers:
+                    path: "{{ .Values.containers.logpath1 }}"
+                    ids:
+                      - "${data.kubernetes.container.name}"
+                    
+                    path: "{{ .Values.containers.logpath2 }}"
+                  
+    processors:
+      - add_kubernetes_metadata:
+          in_cluster: true
+      - decode_json_fields:
+          fields: ["query"]
+          #process_array: true
+          #max_depth: 8
+
+    #output.elasticsearch:
+      #enabled: true
+      #hosts: ["{{ $escreds.hosts }}"]
+      #protocol: "https"
+      #username: "{{ $escreds.username }}"
+      #password: "{{ $escreds.password }}"
+      #ssl.certificate_authorities: ["/usr/share/filebeat/certificate.pem"]
+      #index: "{{ $escreds.index }}"
+    #setup.template:
+      #name: "max-test-log"
+      #pattern: "max-test-log-*"
+      #enabled: false
+    
+    #output.logstash:
+      #hosts: ["{{ $creds.servicename }}.{{ $creds.namespace }}.svc.cluster.local:{{ $creds.port }}"]
+
+     # hosts: ["logstash-service.logging-01.svc.cluster.local:5044"]
+
+    output.file:
+      path: "/usr/share/filebeat/data"
+      filename: filebeat
+      #rotate_every_kb: 10000
+      #number_of_files: 2
+   

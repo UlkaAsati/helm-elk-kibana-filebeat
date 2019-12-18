@@ -1,0 +1,64 @@
+{{- $creds := .Values.logstash -}}
+{{- $condition := .Values.filebeat.provider.whenregexp -}}
+{{- $escreds := .Values.elasticsearch -}}
+{{- $template := .Values.template -}}
+
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: kube-system
+  labels:
+    k8s-app: filebeat
+    kubernetes.io/cluster-service: "true"
+data:
+  filebeat.yml: |-
+    filebeat.config:
+      modules:
+        path: ${path.config}/modules.d/*.yml
+        # Reload module configs as they change:
+        reload.enabled: false
+   
+    filebeat.autodiscover:   
+      providers:
+      - type: kubernetes
+        templates:
+        - condition:
+            equals:
+              #kubernetes.namespace: ls-data-perf
+              kubernetes.namespace: '{{ $condition.kubernetesnamespace }}'
+          config:
+            - type: container
+              paths:
+                - /var/log/containers/*-${data.kubernetes.container.id}.log
+                  
+    processors:
+      - add_kubernetes_metadata:
+          in_cluster: true
+      - decode_json_fields:
+          fields: ["msg"]
+          process_array: true
+          max_depth: 200
+
+    output.elasticsearch:
+      enabled: true
+      hosts: ["{{ $escreds.hosts }}"]
+      protocol: "https"
+      username: "{{ $escreds.username }}"
+      password: "{{ $escreds.password }}"
+      #ssl.enabled: true
+      ssl.certificate_authorities: ["/usr/share/filebeat/certificate.pem"]
+      #ssl.certificate: "/usr/share/filebeat/certificate.pem"
+      index: "{{ $escreds.index }}"
+    setup.template:
+      name: "{{ $template.name }}"
+      pattern: "{{ $template.pattern }}"
+      overwrite: false
+      enabled: false
+    
+    #output.logstash:
+      #hosts: ["{{ $creds.servicename }}.{{ $creds.namespace }}.svc.cluster.local:{{ $creds.port }}"]
+
+     # hosts: ["logstash-service.logging-01.svc.cluster.local:5044"]
+   

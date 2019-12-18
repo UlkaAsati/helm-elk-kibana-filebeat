@@ -1,0 +1,21 @@
+{{- $appName := .Values.labels.appname -}}
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: logstash-service
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app: {{ $appName }}
+  ports:
+  - protocol: TCP
+    port: {{ .Values.service.filebeatPort }}
+    targetPort: {{ .Values.service.filebeatPort }}
+    #nodePort: {{ .Values.service.filebeatnodePort }}
+    name: filebeat
+  - protocol: TCP
+    port: {{ .Values.service.logstashPort }}
+    targetPort: {{ .Values.service.logstashPort }}
+    #nodePort: {{ .Values.service.logstashnodePort }}
+    name: {{ $appName }}

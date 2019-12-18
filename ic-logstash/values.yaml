@@ -1,0 +1,66 @@
+# Default values for logstash.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+namespace: logging-01
+
+image:
+  repository: "docker.elastic.co/logstash/logstash"
+  tag: "7.2.0"
+  pullPolicy: "IfNotPresent"
+
+service:
+  type: ClusterIP
+  filebeatPort: 5044
+  #filebeatnodePort: 30108
+  logstashPort: 9600
+  #logstashnodePort: 30109
+
+env:
+  xpack_monitoring_enabled: "false"
+
+labels:
+    appname: "logstash"
+
+commandline:
+  args: []
+  
+ingress:
+  enabled: false
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths: []
+
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+elasticsearch:
+  hosts: "https://22270cf1-30d1-4b6c-b1bb-bbc875bb16b8.bkvfu0nd0m8k95k94ujg.databases.appdomain.cloud:32034"
+  username: "ibm_cloud_c8ffd101_50e1_48cb_82bb_ea4b77392d7d"
+  password: "f5afaa40c7344ccd44ea3eb531dd61fe9671222d624625e1ee90594a4b4f7a6a"
+  index: "max-log-%{+YYYY.MM.dd}"
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

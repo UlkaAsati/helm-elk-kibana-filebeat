@@ -1,0 +1,61 @@
+# Default values for max-deploy.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+appname: filebeat
+version: 1901.0.0
+namespace: kube-system
+
+# log path compatible to k8 version greater than equal to 14.6.*
+containers:
+  logpath1: "/var/log/pods/${data.kubernetes.namespace}_${data.kubernetes.pod.name}_${data.kubernetes.pod.uid}/"
+  logpath2: "/var/data/kubeletlogs/${data.kubernetes.namespace}_${data.kubernetes.pod.name}_${data.kubernetes.pod.uid}/"
+filebeat:
+  provider:
+    whenregexp:
+      #kubernetescontainername: "t0-datasync-api"
+      kubernetesnamespace: "ls-data-perf"
+image:
+  repository: docker.elastic.co/beats/filebeat
+  tag: 7.5.0
+  pullPolicy: Always
+
+logstash:
+ # we will be using dns service discovery to route the traffic to logstash 
+ # to from filebeat. 
+ # host: logstash-service.logging-01.svc.cluster.local 
+ # or
+ # host: <cluster Ip of logstash-service>:<port>
+  servicename: logstash-service
+  namespace: logging-01
+  port: 5044
+
+elasticsearch:
+  hosts: "https://496df6-adc6-42d9-b879-f9c77705ce81.bkvfv1ld0bj2bdbncbeg.databases.appdomain.cloud:32217"
+  username: "ibm_cloud_9ded3c4_b9e7_4ec0_bb74_49426e297388"
+  password: "ff8a150ce2ea75587af98074f294ebb8523c395352f9aa7c1d9d8873b119d62a"
+  index: "test-log-%{+YYYY.MM.dd}"
+
+#elasticsearch:
+#  hosts: "http://172.19.0.132:9200"
+#  username: "elastic"
+#  password: "Apttu$ls$123"
+#  index: "ls-data-perf-%{+YYYY.MM.dd}"
+
+template:
+  name: "test-log"
+  pattern: "test-log-*"
+
+
+
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #  cpu: 100m
+  #  memory: 128Mi
+  # requests:
+  #  cpu: 100m
+  #  memory: 128Mi

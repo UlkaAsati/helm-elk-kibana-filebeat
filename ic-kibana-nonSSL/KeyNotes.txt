@@ -1,0 +1,27 @@
+Key Notes:
+1. Elastic Search version should be same as that of the the Kibana.
+
+2. Add the SSL certificate as config map along with the user name and password for the elastic search
+
+3. The default chart may have issues with the syntex in the values.yaml, lint it before installing.
+
+4. Change the type under service in the values.yaml as loadBalancer if the kibana needs to be accessed remotely without localhost.
+
+5. Change the type under service in the values.yaml as ClusterIP if the kibana needs to be accessed remotely with localhost.
+
+6. Use the below command to install the chart under ic-system namespace
+
+helm install ./ -n apttus-kibana --namespace ic-system --set service.externalPort=5601 --set env.ELASTICSEARCH_URL=https://ibm_cloud_cd46d39e_962e_4889_b876_891880c10f42:23f0aec927d8d2f4c18dae79a26b605a199c0cc1441be1cb02fcd98099ea7ab3@053ae732-8b8f-4dab-bc67-1a26c550dfa0.6131b73286f34215871dfad7254b4f7d.databases.appdomain.cloud:32671 --set files.kibana.yml.elasticsearch.url=https://ibm_cloud_cd46d39e_962e_4889_b876_891880c10f42:23f0aec927d8d2f4c18dae79a26b605a199c0cc1441be1cb02fcd98099ea7ab3@053ae732-8b8f-4dab-bc67-1a26c550dfa0.6131b73286f34215871dfad7254b4f7d.databases.appdomain.cloud:32671
+
+7. If the service type is ClusterIP, then execute the below command to get the kibana accessible on local host
+
+export POD_NAME=$(kubectl get pods --namespace ic-system -l "app=kibana,release=apttus-kibana" -o jsonpath="{.items[0].metadata.name}")
+kubectl port-forward --namespace ic-system $POD_NAME 5601:5601
+
+Get the IBM k8 cluster config for the requried cluster exported on your local system.
+
+Then go to the browser to hit the ur: https://localhost:5601
+
+8. If the service type is LoadBalancer, then get the load balancer External Ip of the kibana service. Access kibana over the ip remotely.
+
+
