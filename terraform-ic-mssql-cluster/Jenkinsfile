@@ -1,0 +1,67 @@
+pipeline {
+  agent {
+    kubernetes {
+        label 'apttus-terraform-builder'
+        defaultContainer 'jnlp'
+        yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    name: apttus-terraform-builder
+spec:
+  containers:
+  - name: ic-terraform-builder
+    image: art01-ic-plat-dev.jfrog.io/ic-terraform-builder:1.x
+    command:
+    - cat
+    tty: true
+  imagePullSecrets:
+  - name: aic-artifactory-imagepullsecret
+  """
+    }
+  }
+  stages {
+    stage('Module Package') {
+      steps {
+        script {
+          props = readProperties file: './config.properties'
+        }
+          container('ic-terraform-builder') {
+            sh 'make package'
+          }
+      }
+      post{
+        failure{
+          sendNotifications("Failure","$props.JENKINS_SLACK_CHANNEL","Module Package")
+        }
+      }
+    }
+    stage('Module Push'){
+      steps{
+        withCredentials([usernamePassword(credentialsId: "${props.JENKINS_AWS_CREDS_ID}", passwordVariable: 'AWS_SECRET_ACCESS_KEY', usernameVariable: 'AWS_ACCESS_KEY_ID')]) {
+          container('ic-terraform-builder') {
+            sh 'make push AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY'
+          }
+        }
+      }
+      post{
+        failure{
+          sendNotifications("Failure","$props.JENKINS_SLACK_CHANNEL","Module Push")
+        }
+      }
+    }
+    stage('Clean Up'){
+      steps{
+         container('ic-terraform-builder'){
+            sh "make clean"
+          }
+      }
+      post{
+        failure{
+          sendNotifications("Failure","$props.JENKINS_SLACK_CHANNEL","Clean Up")
+        }
+      }
+    }
+  }
+}
